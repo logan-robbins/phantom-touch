@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="ai.qmachina.phantomtouch">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!--
+        QUERY_ALL_PACKAGES lets us launch any app by package name.
+        Fine for sideloaded apps. If targeting Play Store, replace with
+        explicit <queries> blocks below.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!--
+        Explicit package queries (used if you drop QUERY_ALL_PACKAGES).
+        Add any app you want PhantomTouch to launch.
+    -->
+    <queries>
+        <!-- Chrome -->
+        <package android:name="com.android.chrome" />
+        <!-- LinkedIn -->
+        <package android:name="com.linkedin.android" />
+        <!-- Facebook -->
+        <package android:name="com.facebook.katana" />
+        <!-- Facebook Messenger -->
+        <package android:name="com.facebook.orca" />
+        <!-- Instagram -->
+        <package android:name="com.instagram.android" />
+        <!-- Twitter/X -->
+        <package android:name="com.twitter.android" />
+        <!-- WhatsApp -->
+        <package android:name="com.whatsapp" />
+        <!-- Telegram -->
+        <package android:name="org.telegram.messenger" />
+
+        <!-- Allow ACTION_VIEW for any URL -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".PhantomTouchApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="PhantomTouch"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Material3.DayNight"
+        xmlns:tools="http://schemas.android.com/tools">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- AccessibilityService for gesture dispatch + UI tree -->
+        <service
+            android:name=".service.GestureService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_config" />
+        </service>
+
+        <!-- Foreground service for screen capture + HTTP server -->
+        <service
+            android:name=".service.CaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+    </application>
+</manifest>

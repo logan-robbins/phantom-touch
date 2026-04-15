@@ -1,0 +1,46 @@
+# PhantomTouch — OpenClaw Skill Config
+#
+# Drop this in your OpenClaw skills directory or install via:
+#   openclaw skill install /path/to/phantom-touch/gateway
+#
+# The MCP server exposes PhantomTouch tools to your OpenClaw agent.
+# Your agent can then say things like:
+#   "Open LinkedIn on my phone and scroll the feed"
+#   "Post this text on Facebook via Chrome"
+#   "Take a screenshot of my phone"
+
+name: phantom-touch
+description: >
+  Control an Android phone via PhantomTouch. Tap, swipe, type, launch apps,
+  open URLs in Chrome, take screenshots, and automate LinkedIn/Facebook/any app.
+  The phone must be running the PhantomTouch app with the HTTP server active.
+
+tools:
+  - phantom_screenshot
+  - phantom_tap
+  - phantom_tap_and_type
+  - phantom_swipe
+  - phantom_open_url
+  - phantom_launch_app
+  - phantom_find_and_tap
+  - phantom_find_element
+  - phantom_press_back
+  - phantom_press_home
+  - phantom_wait_for_element
+  - phantom_chrome_action
+  - phantom_batch
+
+mcp:
+  command: python
+  args:
+    - mcp_server.py
+  env:
+    PHANTOM_TOUCH_URL: "http://localhost:9090"
+
+# The MCP server talks to the relay at :9090 (not the phone directly).
+# The relay proxies commands to the phone over WebSocket.
+#
+# Setup on VM:
+#   1. python relay_server.py     (opens :9090 HTTP + :9091 WS)
+#   2. Phone connects to ws://<vm-ip>:9091
+#   3. MCP server hits http://localhost:9090
