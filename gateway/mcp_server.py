@@ -47,15 +47,33 @@ app = Server("phantom-touch")
 
 def device_exec(command: dict) -> dict:
     """Execute a command against PhantomTouch HTTP API."""
-    resp = client.post("/execute", json=command)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = client.post("/execute", json=command)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.ConnectError:
+        return {"success": False, "error": "Cannot reach relay server. Is relay_server.py running?"}
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Request timed out. Phone may be unresponsive."}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 503:
+            return {"success": False, "error": "Phone not connected to relay."}
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
 
 
 def device_batch(commands: list[dict]) -> dict:
-    resp = client.post("/execute", json={"batch": commands})
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = client.post("/execute", json={"batch": commands})
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.ConnectError:
+        return {"success": False, "error": "Cannot reach relay server. Is relay_server.py running?"}
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Batch request timed out. Phone may be unresponsive."}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 503:
+            return {"success": False, "error": "Phone not connected to relay."}
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
 
 
 # ── Tool Definitions ───────────────────────────────────────────────
@@ -125,23 +143,29 @@ async def phantom_tap_and_type(x: int, y: int, text: str) -> list[TextContent | 
         {"action": "delay", "ms": 150},
         {"action": "screenshot", "scale": 0.5}
     ])
-    
+
+    if not resp.get("batch"):
+        # Error or single result (shouldn't happen for batch, but handle gracefully)
+        return [TextContent(type="text", text=f"Tap+type failed: {resp.get('error', 'unknown error')}")]
+
     results = resp.get("results", [])
     output = []
-    
+
     # Find the screenshot in batch results
     for r in results:
         if isinstance(r, dict) and r.get("action") == "screenshot" and r.get("success"):
-            output.append(ImageContent(
-                type="image",
-                data=r["result"]["image"],
-                mimeType="image/jpeg"
-            ))
-    
+            result_data = r.get("result", {})
+            if "image" in result_data:
+                output.append(ImageContent(
+                    type="image",
+                    data=result_data["image"],
+                    mimeType="image/jpeg"
+                ))
+
     succeeded = resp.get("allSucceeded", False)
     output.append(TextContent(
         type="text",
-        text=f"Tap ({x},{y}) + type '{text[:50]}...': {'success' if succeeded else 'failed'}"
+        text=f"Tap ({x},{y}) + type '{text[:50]}': {'success' if succeeded else 'failed'}"
     ))
     return output
 
@@ -158,6 +182,8 @@ async def phantom_swipe(direction: str, percent: float = 50, speed: str = "mediu
     """
     # Get screen dimensions
     info = device_exec({"action": "screenInfo"})
+    if not info.get("success"):
+        return [TextContent(type="text", text=f"Swipe failed: {info.get('error', 'could not get screen info')}")]
     w = info["result"]["width"]
     h = info["result"]["height"]
     
@@ -334,11 +360,16 @@ async def phantom_batch(commands_json: str) -> list[TextContent]:
         return [TextContent(type="text", text=f"Invalid JSON: {e}")]
     
     resp = device_batch(commands)
+    if not resp.get("batch"):
+        return [TextContent(type="text", text=f"Batch failed: {resp.get('error', 'unknown error')}")]
+
+    results = resp.get("results", [])
+    summaries = [f"{r.get('action', '?')}:{r.get('success', '?')}" for r in results]
     return [TextContent(
         type="text",
         text=f"Batch of {len(commands)} commands: "
              f"{'all succeeded' if resp.get('allSucceeded') else 'some failed'}. "
-             f"Results: {json.dumps([r.get('action') + ':' + str(r.get('success')) for r in resp.get('results', [])])}"
+             f"Results: {json.dumps(summaries)}"
     )]
 
 

@@ -67,7 +67,7 @@ class CaptureService : Service() {
             val executor = CommandExecutor(this, screenCapture!!)
 
             // Always start local HTTP server (useful for LAN/ADB debugging)
-            commandServer = CommandServer(executor, SERVER_PORT).apply {
+            commandServer = CommandServer(executor, SERVER_PORT, authToken = relayToken).apply {
                 start()
             }
             android.util.Log.i("PhantomTouch", "Local HTTP server on :$SERVER_PORT")

@@ -31,7 +31,7 @@ tools:
   - phantom_batch
 
 mcp:
-  command: python
+  command: python3
   args:
     - mcp_server.py
   env:

@@ -18,8 +18,8 @@ WebSocket connection to a relay server on the VM. Commands flow down, results fl
 │  └─────────────┘    └──────────────┬───────────────────┘          │
 │         │                          │                              │
 │  ┌──────▼────────┐                 │                              │
-│  │ MCP Server or │                 │  WebSocket                   │
-│  │ Tool Gateway  │─── localhost ──→│  (outbound from phone)       │
+│  │ MCP Server    │                 │  WebSocket                   │
+│  │ (mcp_server)  │─── localhost ──→│  (outbound from phone)       │
 │  └───────────────┘    :9090        │                              │
 └────────────────────────────────────┼──────────────────────────────┘
                                      │
@@ -71,38 +71,31 @@ Build and install the PhantomTouch app, then follow the 5-step onboarding:
 
 The app connects to the relay and goes headless.
 
-### 3. Gateway Setup (on the VM)
+### 3. OpenClaw Integration (on the VM)
 
-**MCP Server** (for OpenClaw):
+The MCP server runs as a child process of OpenClaw, registered via `skill.yaml` or
+`mcpServers` in `openclaw.json`. OpenClaw sees PhantomTouch tools as native callable
+functions and uses them to control the phone.
+
 ```bash
-# Point at the relay instead of the phone directly
+# The MCP server points at the relay (not the phone directly)
 export PHANTOM_TOUCH_URL=http://localhost:9090
 python gateway/mcp_server.py
 ```
 
-**Standalone Agent** (CLI):
-```bash
-export PHANTOM_TOUCH_URL=http://localhost:9090
-export XAI_API_KEY=...
-python gateway/tool_gateway.py "Open LinkedIn and scroll the feed"
-```
-
-The gateway doesn't know the phone is remote — it just hits `localhost:9090`,
+The MCP server doesn't know the phone is remote — it just hits `localhost:9090`,
 which the relay proxies to the phone over WebSocket.
+
+For remote-claw VMs, the update script (`007-phantom-touch.sh`) handles installation
+automatically: starts the relay as a systemd service and registers the MCP server
+in `openclaw.json`.
 
 ## How the LLM Emits Commands
 
-The LLM never writes raw JSON commands. Instead:
-
-**With MCP (OpenClaw/Claude):** The LLM sees tools like `phantom_tap()`, 
-`phantom_open_url()`, `phantom_screenshot()` as native callable functions. 
-It decides which to call based on the conversation. The MCP server translates 
-tool calls to PhantomTouch HTTP requests.
-
-**With Tool Calling (Grok/GPT-4o/Claude API):** The gateway defines 12 tools 
-as function schemas. The LLM makes structured `tool_calls` in its response. 
-The gateway executes them and feeds results back. The LLM sees screenshot 
-images and decides the next action. This is a standard agent loop.
+The LLM never writes raw JSON commands. OpenClaw sees tools like `phantom_tap()`,
+`phantom_open_url()`, `phantom_screenshot()` as native callable functions via the
+MCP server. It decides which to call based on the conversation. The MCP server
+translates tool calls to PhantomTouch HTTP requests against the relay.
 
 **Flow example:**
 ```
@@ -122,7 +115,8 @@ LLM → tool_call: tap_and_type(x=540, y=600, text="hello world")
       ← result: {success: true}
 LLM → tool_call: screenshot()
       ← result: {image showing typed text}
-LLM → tool_call: task_complete(summary="Typed 'hello world' in LinkedIn post composer")
+LLM → tool_call: find_and_tap(query="Post")
+      ← result: {found: true, tapped_at: [540, 200]}
 ```
 
 ## Command Reference
@@ -170,12 +164,9 @@ phantom-touch/
 │   └── build.gradle
 ├── gateway/                      # Runs on VM (Python)
 │   ├── relay_server.py          # WS relay (phone ↔ gateway bridge)
-│   ├── mcp_server.py            # MCP tools for OpenClaw/Claude
-│   ├── tool_gateway.py          # Standalone tool-calling agent
+│   ├── mcp_server.py            # MCP tools for OpenClaw
 │   ├── skill.yaml               # OpenClaw skill config
 │   └── requirements.txt
-├── orchestrator/                 # Raw Python client (for direct HTTP)
-│   └── agent.py
 ├── build.gradle
 └── settings.gradle
 ```

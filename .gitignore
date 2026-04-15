@@ -1,0 +1,21 @@
+# Android build
+build/
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Secrets
+.env
+*.keystore

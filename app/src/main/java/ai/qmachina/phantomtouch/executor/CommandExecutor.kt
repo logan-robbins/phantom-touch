@@ -95,11 +95,22 @@ class CommandExecutor(
                 }
 
                 is Command.ClearField -> {
-                    // Select all + delete
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_MOVE_HOME")).waitFor()
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "--longpress", "KEYCODE_SHIFT_LEFT", "KEYCODE_MOVE_END")).waitFor()
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_DEL")).waitFor()
-                    CommandResult("clearField", true)
+                    // Try accessibility first (works on all devices)
+                    val node = gesture.findFocusedEditableNode()
+                    if (node != null) {
+                        val args = Bundle().apply {
+                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "")
+                        }
+                        val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                        node.recycle()
+                        CommandResult("clearField", ok)
+                    } else {
+                        // Fallback: keyboard-based select all + delete
+                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_MOVE_HOME")).waitFor()
+                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "--longpress", "KEYCODE_SHIFT_LEFT", "KEYCODE_MOVE_END")).waitFor()
+                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_DEL")).waitFor()
+                        CommandResult("clearField", true)
+                    }
                 }
 
                 // ── Navigation ────────────────────────────────────
@@ -217,7 +228,9 @@ class CommandExecutor(
                 }
             }
         } catch (e: Exception) {
-            CommandResult(command::class.simpleName ?: "unknown", false, error = e.message)
+            android.util.Log.e("CommandExecutor", "Command failed: ${command::class.simpleName}", e)
+            CommandResult(command::class.simpleName ?: "unknown", false,
+                error = "${e.javaClass.simpleName}: ${e.message}")
         }
     }
 

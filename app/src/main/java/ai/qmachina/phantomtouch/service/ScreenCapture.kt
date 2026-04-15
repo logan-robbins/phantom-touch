@@ -75,10 +75,14 @@ class ScreenCapture(private val context: Context) {
                 null, null
             )
 
-            // Give the system time to render a frame
-            Thread.sleep(150)
-
-            val image = imageReader.acquireLatestImage() ?: return null
+            // Give the system time to render a frame, retry if null
+            var image: android.media.Image? = null
+            for (attempt in 1..3) {
+                Thread.sleep(150)
+                image = imageReader.acquireLatestImage()
+                if (image != null) break
+            }
+            if (image == null) return null
             try {
                 val planes = image.planes
                 val buffer = planes[0].buffer

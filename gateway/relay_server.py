@@ -47,6 +47,7 @@ Environment:
 import asyncio
 import json
 import os
+import sys
 import time
 import uuid
 import logging
@@ -61,6 +62,12 @@ log = logging.getLogger("relay")
 HTTP_PORT = int(os.environ.get("RELAY_HTTP_PORT", "9090"))
 WS_PORT = int(os.environ.get("RELAY_WS_PORT", "9091"))
 RELAY_TOKEN = os.environ.get("RELAY_TOKEN", "")
+REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "true").lower() in ("1", "true", "yes")
+
+if REQUIRE_AUTH and not RELAY_TOKEN:
+    log.error("RELAY_TOKEN must be set when REQUIRE_AUTH=true. "
+              "Set RELAY_TOKEN=<secret> or REQUIRE_AUTH=false to disable.")
+    sys.exit(1)
 
 # ── Phone Connection State ─────────────────────────────────────────
 
@@ -70,6 +77,7 @@ class PhoneConnection:
     def __init__(self):
         self.ws: Optional[websockets.WebSocketServerProtocol] = None
         self.connected_at: Optional[float] = None
+        self.last_heartbeat: float = 0
         self.device_info: dict = {}
         self._pending: dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
@@ -91,7 +99,7 @@ class PhoneConnection:
             "timestamp": time.time()
         }
 
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
 
         try:
@@ -132,7 +140,7 @@ async def handle_phone_ws(websocket, path):
     global phone
 
     # Auth check
-    if RELAY_TOKEN:
+    if REQUIRE_AUTH and RELAY_TOKEN:
         try:
             auth_msg = await asyncio.wait_for(websocket.recv(), timeout=10)
             auth = json.loads(auth_msg)
@@ -156,6 +164,7 @@ async def handle_phone_ws(websocket, path):
 
     phone.ws = websocket
     phone.connected_at = time.time()
+    phone.last_heartbeat = time.time()
     log.info(f"Phone connected from {websocket.remote_address}")
 
     try:
@@ -185,6 +194,7 @@ async def handle_phone_ws(websocket, path):
                         log.warning(f"Response without id: {msg}")
 
                 elif msg_type == "heartbeat":
+                    phone.last_heartbeat = time.time()
                     await websocket.send(json.dumps({"type": "heartbeat_ack"}))
 
                 else:
@@ -249,7 +259,28 @@ async def handle_screen(request: web.Request) -> web.Response:
 
 # ── Main ───────────────────────────────────────────────────────────
 
+HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "90"))
+
+
+async def heartbeat_watchdog():
+    """Close stale phone connections that stop sending heartbeats."""
+    while True:
+        await asyncio.sleep(30)
+        if phone.is_connected and phone.last_heartbeat > 0:
+            since = time.time() - phone.last_heartbeat
+            if since > HEARTBEAT_TIMEOUT:
+                log.warning(f"Phone heartbeat stale ({since:.0f}s) — closing connection")
+                try:
+                    await phone.ws.close(4002, "Heartbeat timeout")
+                except Exception:
+                    pass
+                phone.disconnect()
+
+
 async def main():
+    # Start heartbeat watchdog
+    asyncio.create_task(heartbeat_watchdog())
+
     # Start WebSocket server for phone
     ws_server = await websockets.serve(handle_phone_ws, "0.0.0.0", WS_PORT)
     log.info(f"WebSocket server listening on :{WS_PORT} (phone connects here)")

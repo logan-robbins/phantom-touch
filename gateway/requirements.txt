@@ -1,5 +1,5 @@
 # Gateway dependencies
-httpx>=0.27.0
-mcp>=1.0.0         # for MCP server mode (OpenClaw / Claude Desktop)
-websockets>=12.0   # for relay_server.py
-aiohttp>=3.9.0     # for relay_server.py HTTP endpoint
+httpx>=0.27.0,<1.0
+mcp>=1.0.0,<2.0       # for MCP server mode (OpenClaw / Claude Desktop)
+websockets>=12.0,<14.0 # for relay_server.py
+aiohttp>=3.9.0,<4.0   # for relay_server.py HTTP endpoint

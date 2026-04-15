@@ -28,10 +28,21 @@ import org.json.JSONObject
  */
 class CommandServer(
     private val executor: CommandExecutor,
-    port: Int = 8080
+    port: Int = 8080,
+    private val authToken: String = ""
 ) : NanoHTTPD(port) {
 
     override fun serve(session: IHTTPSession): Response {
+        // Bearer token check if configured
+        if (authToken.isNotEmpty()) {
+            val header = session.headers["authorization"] ?: ""
+            if (header != "Bearer $authToken") {
+                return jsonResponse(Response.Status.UNAUTHORIZED, JSONObject().apply {
+                    put("error", "Invalid or missing auth token")
+                })
+            }
+        }
+
         return try {
             when {
                 session.uri == "/health" && session.method == Method.GET -> {
@@ -68,13 +79,23 @@ class CommandServer(
     }
 
     private fun handleExecute(session: IHTTPSession): Response {
-        // Read POST body
-        val contentLength = session.headers["content-length"]?.toIntOrNull() ?: 0
-        val buffer = ByteArray(contentLength)
-        session.inputStream.read(buffer, 0, contentLength)
-        val body = String(buffer)
+        // Read POST body via NanoHTTPD's built-in parser (handles chunked/partial reads)
+        val bodyMap = HashMap<String, String>()
+        session.parseBody(bodyMap)
+        val body = bodyMap["postData"] ?: ""
+        if (body.isBlank()) {
+            return jsonResponse(Response.Status.BAD_REQUEST, JSONObject().apply {
+                put("error", "Request body is empty or missing")
+            })
+        }
 
-        val json = JSONObject(body)
+        val json = try {
+            JSONObject(body)
+        } catch (e: org.json.JSONException) {
+            return jsonResponse(Response.Status.BAD_REQUEST, JSONObject().apply {
+                put("error", "Invalid JSON: ${e.message}")
+            })
+        }
         val commands = Command.parseBatch(json)
 
         // Execute (blocking on the server thread — fine for NanoHTTPD's thread pool)

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="ai.qmachina.phantomtouch">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -48,11 +49,10 @@
     <application
         android:name=".PhantomTouchApp"
         android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@android:drawable/sym_def_app_icon"
         android:label="PhantomTouch"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Material3.DayNight"
-        xmlns:tools="http://schemas.android.com/tools">
+        android:theme="@android:style/Theme.DeviceDefault">
 
         <activity
             android:name=".MainActivity"

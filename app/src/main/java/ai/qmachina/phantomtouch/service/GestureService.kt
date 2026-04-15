@@ -149,7 +149,7 @@ class GestureService : AccessibilityService() {
         return result
     }
 
-    private fun findFocusedEditableNode(): AccessibilityNodeInfo? {
+    fun findFocusedEditableNode(): AccessibilityNodeInfo? {
         // Try input focus first (text fields)
         var node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (node != null && node.isEditable) return node
