@@ -59,7 +59,9 @@ class CaptureService : Service() {
         val relayUrl = intent?.getStringExtra(EXTRA_RELAY_URL) ?: ""
         val relayToken = intent?.getStringExtra(EXTRA_RELAY_TOKEN) ?: ""
 
-        if (resultCode != -1 && data != null) {
+        android.util.Log.i("PhantomTouch", "onStartCommand: resultCode=$resultCode data=${data != null} relayUrl=$relayUrl")
+
+        if (resultCode == android.app.Activity.RESULT_OK && data != null) {
             screenCapture = ScreenCapture(this).apply {
                 initialize(resultCode, data)
             }
@@ -67,10 +69,14 @@ class CaptureService : Service() {
             val executor = CommandExecutor(this, screenCapture!!)
 
             // Always start local HTTP server (useful for LAN/ADB debugging)
-            commandServer = CommandServer(executor, SERVER_PORT, authToken = relayToken).apply {
-                start()
+            try {
+                commandServer = CommandServer(executor, SERVER_PORT, authToken = relayToken).apply {
+                    start()
+                }
+                android.util.Log.i("PhantomTouch", "Local HTTP server on :$SERVER_PORT")
+            } catch (e: Exception) {
+                android.util.Log.e("PhantomTouch", "Failed to start CommandServer", e)
             }
-            android.util.Log.i("PhantomTouch", "Local HTTP server on :$SERVER_PORT")
 
             // Start relay client if URL is configured
             if (relayUrl.isNotBlank()) {

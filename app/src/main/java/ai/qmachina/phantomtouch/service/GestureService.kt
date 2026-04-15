@@ -128,10 +128,6 @@ class GestureService : AccessibilityService() {
         return dispatchGestureAsync(gesture)
     }
 
-    /** Public accessor for the active window root node (used by CommandExecutor.findNode) */
-    val rootInActiveWindow: AccessibilityNodeInfo?
-        get() = super.getRootInActiveWindow()
-
     // ── Text Input ────────────────────────────────────────────────────
 
     /**
