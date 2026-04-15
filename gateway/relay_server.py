@@ -84,7 +84,10 @@ class PhoneConnection:
 
     @property
     def is_connected(self) -> bool:
-        return self.ws is not None and self.ws.open
+        if self.ws is None:
+            return False
+        from websockets.protocol import State
+        return self.ws.state == State.OPEN
 
     async def send_command(self, command: dict, timeout: float = 30.0) -> dict:
         """Send a command to the phone and wait for the response."""
@@ -135,7 +138,7 @@ phone = PhoneConnection()
 
 # ── WebSocket Server (phone connects here) ─────────────────────────
 
-async def handle_phone_ws(websocket, path):
+async def handle_phone_ws(websocket):
     """Handle incoming WebSocket connection from the phone."""
     global phone
 

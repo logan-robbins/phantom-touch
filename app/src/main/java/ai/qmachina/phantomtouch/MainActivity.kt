@@ -206,7 +206,7 @@ class MainActivity : Activity() {
 
         // Restore saved relay URL
         val prefs = getPreferences(Context.MODE_PRIVATE)
-        relayUrlInput.setText(prefs.getString("relay_url", ""))
+        relayUrlInput.setText(prefs.getString("relay_url", "ws://localhost:9091"))
         relayTokenInput.setText(prefs.getString("relay_token", ""))
     }
 

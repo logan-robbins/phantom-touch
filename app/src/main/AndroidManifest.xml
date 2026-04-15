@@ -49,6 +49,7 @@
     <application
         android:name=".PhantomTouchApp"
         android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="PhantomTouch"
         android:supportsRtl="true"
