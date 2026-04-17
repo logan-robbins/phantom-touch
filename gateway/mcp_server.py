@@ -345,6 +345,100 @@ async def phantom_chrome_action(action: str) -> list[TextContent]:
 
 
 @app.tool()
+async def phantom_click(query: str, index: int = 0) -> list[TextContent]:
+    """
+    Click a UI element by its text label using accessibility ACTION_CLICK.
+    More reliable than coordinate-based tap — use this when you know the element's text.
+    Works like TalkBack: finds the element in the UI tree and clicks it directly.
+
+    Args:
+        query: Text of the element to click (e.g., "Post", "Sign in", "Search Google")
+        index: Which match to click if multiple found (0 = first, default)
+    """
+    resp = device_exec({"action": "clickNode", "query": query, "index": index})
+    if resp.get("success"):
+        r = resp.get("result", {})
+        return [TextContent(type="text", text=f"Clicked '{r.get('clickedText', query)}' at ({r.get('centerX')}, {r.get('centerY')})")]
+    return [TextContent(type="text", text=f"Click failed: {resp.get('error')}. Try phantom_tap with coordinates instead.")]
+
+
+@app.tool()
+async def phantom_long_click(query: str, index: int = 0) -> list[TextContent]:
+    """
+    Long-press a UI element by its text label using accessibility ACTION_LONG_CLICK.
+    Use for context menus, drag handles, edit modes.
+
+    Args:
+        query: Text of the element to long-press
+        index: Which match to long-press if multiple found (0 = first)
+    """
+    resp = device_exec({"action": "longClickNode", "query": query, "index": index})
+    if resp.get("success"):
+        return [TextContent(type="text", text=f"Long-clicked '{query}'")]
+    return [TextContent(type="text", text=f"Long-click failed: {resp.get('error')}")]
+
+
+@app.tool()
+async def phantom_fill_field(query: str, text: str) -> list[TextContent | ImageContent]:
+    """
+    Find a text field by its label/placeholder and type text into it.
+    Focuses the field (ACTION_FOCUS), then commits one character at a time
+    through the AccessibilityInputConnection — the same IME path Voice Access
+    uses — with a human-scale inter-keystroke cadence.
+    No coordinate math needed — just provide the field's label text.
+    Takes a verification screenshot after filling.
+
+    Args:
+        query: Label or placeholder text of the field (e.g., "Search Google or type URL", "Email", "Password")
+        text: Text to type into the field
+    """
+    resp = device_exec({"action": "setNodeText", "query": query, "text": text})
+    output = []
+    if resp.get("success"):
+        output.append(TextContent(type="text", text=f"Filled '{query}' with '{text[:50]}'"))
+    else:
+        output.append(TextContent(type="text", text=f"Fill failed: {resp.get('error')}"))
+    # Take verification screenshot
+    ss = device_exec({"action": "screenshot", "scale": 0.5})
+    if ss.get("success"):
+        output.append(ImageContent(type="image", data=ss["result"]["image"], mimeType="image/jpeg"))
+    return output
+
+
+@app.tool()
+async def phantom_scroll(direction: str, times: int = 1, container_query: str = "") -> list[TextContent]:
+    """
+    Scroll using accessibility actions (like Switch Access does).
+    More natural than coordinate-based swipe. The app decides scroll amount.
+    Use for scrolling feeds (LinkedIn, Facebook, YouTube), lists, and pages.
+
+    Args:
+        direction: "up", "down", "left", or "right"
+        times: How many scroll steps (default 1)
+        container_query: Optional text to find specific scrollable container (empty = first scrollable)
+    """
+    resp = device_exec({"action": "scrollNode", "direction": direction, "times": times, "query": container_query})
+    if resp.get("success"):
+        return [TextContent(type="text", text=f"Scrolled {direction} {times}x")]
+    return [TextContent(type="text", text=f"Scroll failed: {resp.get('error')}. Try phantom_swipe as fallback.")]
+
+
+@app.tool()
+async def phantom_dismiss(query: str = "") -> list[TextContent]:
+    """
+    Dismiss a dialog, popup, or overlay using accessibility ACTION_DISMISS.
+    Use instead of pressing back when you want to close a modal without affecting navigation.
+
+    Args:
+        query: Text of the dialog to dismiss (empty = dismiss any focused overlay)
+    """
+    resp = device_exec({"action": "dismissNode", "query": query})
+    if resp.get("success"):
+        return [TextContent(type="text", text=f"Dismissed{' ' + query if query else ' overlay'}")]
+    return [TextContent(type="text", text=f"Dismiss failed: {resp.get('error')}. Try phantom_press_back instead.")]
+
+
+@app.tool()
 async def phantom_batch(commands_json: str) -> list[TextContent]:
     """
     Execute multiple commands in sequence. Use for complex multi-step interactions

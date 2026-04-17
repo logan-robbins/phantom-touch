@@ -44,6 +44,32 @@ WebSocket connection to a relay server on the VM. Commands flow down, results fl
 **Key insight:** The phone connects OUT to the VM. No inbound ports on the phone,
 no VPN, no Tailscale, no ADB. Works over cellular, home WiFi, anywhere.
 
+## Input Fidelity
+
+PhantomTouch drives the phone through the same `AccessibilityService` APIs
+TalkBack, Voice Access, and Switch Access use — and avoids the patterns that
+historically flag an installed app as adversarial automation.
+
+- **Taps** resolve via `AccessibilityNodeInfo.ACTION_CLICK` first (TalkBack
+  parity), falling back to a jittered `dispatchGesture` stroke (σ = 15 px,
+  60–90 ms duration).
+- **Swipes** emit a single cubic-Bezier arc with a perpendicular control-point
+  offset, not a ruler-straight line.
+- **Typing** commits one character at a time through
+  `InputMethod.AccessibilityInputConnection.commitText` — the same IME channel
+  Voice Access uses — with a lognormal inter-keystroke cadence (median 200 ms).
+  One `TextWatcher.onTextChanged` callback per keystroke, matching a real soft
+  keyboard.
+- **Keyboard chords** (Chrome's Ctrl-L, Ctrl-R, etc.) are paired DOWN/UP
+  `KeyEvent`s flagged `FLAG_SOFT_KEYBOARD | FLAG_KEEP_TOUCH_MODE`, sent via
+  `AccessibilityInputConnection.sendKeyEvent`.
+- **No** `Runtime.exec("input …")`, **no** `ACTION_SET_TEXT`, **no** clipboard
+  paste. Those patterns match known malware (Gustuff) and are not how the
+  built-in assistive technologies work.
+
+Design rationale, accepted limits, and citations live in
+[`docs/superpowers/specs/2026-04-16-accessibility-fidelity-design.md`](docs/superpowers/specs/2026-04-16-accessibility-fidelity-design.md).
+
 ## Quick Start
 
 ### 1. VM Setup (Azure / any server)
@@ -70,6 +96,16 @@ Build and install the PhantomTouch app, then follow the 5-step onboarding:
 5. Start & Minimize
 
 The app connects to the relay and goes headless.
+
+> **Android 13+ sideloading note.** If the accessibility toggle for PhantomTouch
+> is greyed out the first time, open Settings → Apps → PhantomTouch → ⋮ (top-right)
+> → **"Allow restricted settings"**, then return to the onboarding screen. One-time
+> per install. Android blocks sideloaded APKs from flipping the accessibility
+> switch until the user explicitly overrides it.
+
+**Build requirements.** Android Studio Hedgehog+ / JDK 17, Android SDK platform 34.
+`minSdk = 34` (Android 14) — API 34 is the first release with reliable
+`AccessibilityService.InputMethod` wiring across Samsung One UI and Xiaomi HyperOS.
 
 ### 3. OpenClaw Integration (on the VM)
 
@@ -128,14 +164,14 @@ LLM → tool_call: find_and_tap(query="Post")
 | `longPress` | Long press with configurable duration |
 | `swipe` | Swipe with start/end coords and duration (speed) |
 | `pinch` | Two-finger pinch (zoom in/out) |
-| `type` | Type text into focused field |
-| `clearField` | Select all + delete |
-| `keyEvent` | Send Android key code (66=Enter, 4=Back) |
+| `type` | Type into focused field (per-character commitText via AccessibilityInputConnection, humanized cadence) |
+| `clearField` | Delete the focused field's contents via the AccessibilityInputConnection |
+| `keyEvent` | Send an Android `KeyEvent` (paired DOWN/UP) through the AccessibilityInputConnection — e.g. 66=Enter, 4=Back |
 | `back` / `home` / `recents` | System navigation |
 | `launchApp` | Launch app by package name |
 | `openUrl` | Open URL in Chrome via Intent |
 | `chromeNewTab` | New Chrome tab |
-| `chromeAction` | Chrome keyboard shortcuts (addressBar, refresh, find, etc) |
+| `chromeAction` | Chrome keyboard chords (addressBar, refresh, find, etc) delivered as soft-IME `KeyEvent`s |
 | `screenshot` | Capture screen as base64 JPEG |
 | `dumpTree` | Full accessibility tree as JSON |
 | `findNode` | Search tree for elements by text |
@@ -152,13 +188,17 @@ phantom-touch/
 │   │   ├── AndroidManifest.xml
 │   │   ├── res/
 │   │   └── java/.../
-│   │       ├── MainActivity.kt        # 5-step onboarding UI
-│   │       ├── model/Command.kt       # Command protocol
+│   │       ├── MainActivity.kt         # 5-step onboarding UI
+│   │       ├── model/Command.kt        # Command protocol (sealed class)
 │   │       ├── executor/CommandExecutor.kt
-│   │       ├── relay/RelayClient.kt   # Outbound WS to VM
+│   │       ├── relay/RelayClient.kt    # Outbound WS to VM
 │   │       ├── server/CommandServer.kt # Local HTTP (optional)
+│   │       ├── fidelity/               # Accessibility-fidelity input stack
+│   │       │   ├── Humanizer.kt        # Gesture synthesis (ACTION_CLICK-first tap, arced swipe, …)
+│   │       │   ├── Typewriter.kt       # PhantomInputMethod + per-char commitText / sendKeyEvent
+│   │       │   └── Distributions.kt    # Seeded lognormal / gaussian2D / uniform samplers
 │   │       └── service/
-│   │           ├── GestureService.kt   # AccessibilityService
+│   │           ├── GestureService.kt   # AccessibilityService (thin wrapper)
 │   │           ├── ScreenCapture.kt    # MediaProjection
 │   │           └── CaptureService.kt   # Foreground service
 │   └── build.gradle

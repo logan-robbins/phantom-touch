@@ -73,6 +73,25 @@ sealed class Command {
      *  Much smaller payload than full tree dump. */
     data class FindNode(val query: String, val clickable: Boolean = false) : Command()
 
+    // ── Accessibility actions ────────────────────────────────────
+    /** Find a node by text/desc and click it via ACTION_CLICK.
+     *  Preferred over coordinate tap — uses the same API as TalkBack. */
+    data class ClickNode(val query: String, val index: Int = 0) : Command()
+
+    /** Find a node by text/desc and long-click via ACTION_LONG_CLICK. */
+    data class LongClickNode(val query: String, val index: Int = 0) : Command()
+
+    /** Find a text field by label and type into it via AccessibilityInputConnection
+     *  (per-character commitText through the IME path, same as Voice Access). */
+    data class SetNodeText(val query: String, val text: String) : Command()
+
+    /** Scroll a container using ACTION_SCROLL_FORWARD/BACKWARD.
+     *  If query is empty, finds the first scrollable container from root. */
+    data class ScrollNode(val direction: String, val times: Int = 1, val query: String = "") : Command()
+
+    /** Dismiss a dialog/overlay via ACTION_DISMISS. */
+    data class DismissNode(val query: String = "") : Command()
+
     // ── Flow control ──────────────────────────────────────────────
     data class Delay(val ms: Long) : Command()
 
@@ -137,6 +156,26 @@ sealed class Command {
                 "findNode" -> FindNode(
                     query = json.getString("query"),
                     clickable = json.optBoolean("clickable", false)
+                )
+                "clickNode" -> ClickNode(
+                    query = json.getString("query"),
+                    index = json.optInt("index", 0)
+                )
+                "longClickNode" -> LongClickNode(
+                    query = json.getString("query"),
+                    index = json.optInt("index", 0)
+                )
+                "setNodeText" -> SetNodeText(
+                    query = json.getString("query"),
+                    text = json.getString("text")
+                )
+                "scrollNode" -> ScrollNode(
+                    direction = json.getString("direction"),
+                    times = json.optInt("times", 1),
+                    query = json.optString("query", "")
+                )
+                "dismissNode" -> DismissNode(
+                    query = json.optString("query", "")
                 )
                 "delay" -> Delay(ms = json.getLong("ms"))
                 "waitForNode" -> WaitForNode(

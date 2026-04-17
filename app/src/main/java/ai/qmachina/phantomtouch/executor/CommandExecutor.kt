@@ -1,10 +1,9 @@
 package ai.qmachina.phantomtouch.executor
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Bundle
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import ai.qmachina.phantomtouch.model.Command
 import ai.qmachina.phantomtouch.model.CommandResult
@@ -42,29 +41,30 @@ class CommandExecutor(
             ?: return CommandResult("error", false,
                 error = "AccessibilityService not running. Enable in Settings → Accessibility → PhantomTouch")
 
+        val humanizer = gesture.humanizer
+        val typewriter = gesture.typewriter
+
         return try {
             when (command) {
                 // ── Gestures ──────────────────────────────────────
                 is Command.Tap -> {
-                    CommandResult("tap", gesture.tap(command.x, command.y),
+                    CommandResult("tap", humanizer.tap(command.x, command.y),
                         data = jsonOf("x" to command.x, "y" to command.y))
                 }
 
                 is Command.DoubleTap -> {
-                    val ok1 = gesture.tap(command.x, command.y)
-                    delay(command.intervalMs)
-                    val ok2 = gesture.tap(command.x, command.y)
-                    CommandResult("doubleTap", ok1 && ok2)
+                    CommandResult("doubleTap",
+                        humanizer.doubleTap(command.x, command.y, command.intervalMs))
                 }
 
                 is Command.LongPress -> {
                     CommandResult("longPress",
-                        gesture.longPress(command.x, command.y, command.durationMs))
+                        humanizer.longPress(command.x, command.y, command.durationMs))
                 }
 
                 is Command.Swipe -> {
                     CommandResult("swipe",
-                        gesture.swipe(command.startX, command.startY,
+                        humanizer.swipe(command.startX, command.startY,
                             command.endX, command.endY, command.durationMs),
                         data = jsonOf(
                             "startX" to command.startX, "startY" to command.startY,
@@ -74,7 +74,7 @@ class CommandExecutor(
                 }
 
                 is Command.Pinch -> {
-                    val ok = gesture.pinch(
+                    val ok = humanizer.pinch(
                         command.centerX, command.centerY,
                         command.startSpan, command.endSpan,
                         command.durationMs
@@ -84,33 +84,17 @@ class CommandExecutor(
 
                 // ── Text input ────────────────────────────────────
                 is Command.Type -> {
-                    CommandResult("type", gesture.typeText(command.text),
+                    CommandResult("type", typewriter.type(command.text),
                         data = jsonOf("text" to command.text))
                 }
 
                 is Command.KeyEvent -> {
-                    val p = Runtime.getRuntime().exec(
-                        arrayOf("input", "keyevent", command.keyCode.toString()))
-                    CommandResult("keyEvent", p.waitFor() == 0)
+                    CommandResult("keyEvent", typewriter.sendKey(command.keyCode),
+                        data = jsonOf("keyCode" to command.keyCode))
                 }
 
                 is Command.ClearField -> {
-                    // Try accessibility first (works on all devices)
-                    val node = gesture.findFocusedEditableNode()
-                    if (node != null) {
-                        val args = Bundle().apply {
-                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "")
-                        }
-                        val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                        node.recycle()
-                        CommandResult("clearField", ok)
-                    } else {
-                        // Fallback: keyboard-based select all + delete
-                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_MOVE_HOME")).waitFor()
-                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "--longpress", "KEYCODE_SHIFT_LEFT", "KEYCODE_MOVE_END")).waitFor()
-                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_DEL")).waitFor()
-                        CommandResult("clearField", true)
-                    }
+                    CommandResult("clearField", typewriter.clear())
                 }
 
                 // ── Navigation ────────────────────────────────────
@@ -167,7 +151,7 @@ class CommandExecutor(
                 }
 
                 is Command.ChromeAction -> {
-                    val ok = executeChromeAction(command.action)
+                    val ok = executeChromeAction(typewriter, command.action)
                     CommandResult("chromeAction", ok, data = jsonOf("action" to command.action))
                 }
 
@@ -211,6 +195,75 @@ class CommandExecutor(
                     })
                 }
 
+                // ── Accessibility actions ────────────────────────
+                is Command.ClickNode -> {
+                    val node = findFirstMatchingNode(gesture, command.query, command.index)
+                        ?: return CommandResult("clickNode", false,
+                            error = "No clickable node matching '${command.query}'")
+                    val rect = android.graphics.Rect()
+                    node.getBoundsInScreen(rect)
+                    val ok = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    val text = node.text?.toString() ?: ""
+                    node.recycle()
+                    CommandResult("clickNode", ok, data = jsonOf(
+                        "query" to command.query, "clickedText" to text,
+                        "centerX" to rect.centerX(), "centerY" to rect.centerY()))
+                }
+
+                is Command.LongClickNode -> {
+                    val node = findFirstMatchingNode(gesture, command.query, command.index)
+                        ?: return CommandResult("longClickNode", false,
+                            error = "No node matching '${command.query}'")
+                    val ok = node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+                    node.recycle()
+                    CommandResult("longClickNode", ok, data = jsonOf("query" to command.query))
+                }
+
+                is Command.SetNodeText -> {
+                    val node = findFirstMatchingNode(gesture, command.query, index = 0, requireEditable = true)
+                        ?: return CommandResult("setNodeText", false,
+                            error = "No editable node matching '${command.query}'")
+                    val ok = typewriter.typeInto(node, command.text)
+                    node.recycle()
+                    CommandResult("setNodeText", ok, data = jsonOf(
+                        "query" to command.query, "textLength" to command.text.length))
+                }
+
+                is Command.ScrollNode -> {
+                    val scrollable = findScrollableNode(gesture, command.query)
+                        ?: return CommandResult("scrollNode", false,
+                            error = "No scrollable container found" +
+                                if (command.query.isNotEmpty()) " matching '${command.query}'" else "")
+                    val action = if (command.direction == "down" || command.direction == "right")
+                        AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    var ok = true
+                    repeat(command.times) {
+                        if (ok) {
+                            ok = scrollable.performAction(action)
+                            if (command.times > 1) delay(300) // pause between scrolls
+                        }
+                    }
+                    scrollable.recycle()
+                    CommandResult("scrollNode", ok, data = jsonOf(
+                        "direction" to command.direction, "times" to command.times))
+                }
+
+                is Command.DismissNode -> {
+                    if (command.query.isNotEmpty()) {
+                        val node = findFirstMatchingNode(gesture, command.query, index = 0)
+                            ?: return CommandResult("dismissNode", false,
+                                error = "No node matching '${command.query}'")
+                        val ok = node.performAction(AccessibilityNodeInfo.ACTION_DISMISS)
+                        node.recycle()
+                        CommandResult("dismissNode", ok, data = jsonOf("query" to command.query))
+                    } else {
+                        // Try to dismiss any focused dialog
+                        val ok = gesture.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                        CommandResult("dismissNode", ok)
+                    }
+                }
+
                 // ── Flow control ──────────────────────────────────
                 is Command.Delay -> {
                     delay(command.ms)
@@ -236,20 +289,26 @@ class CommandExecutor(
 
     // ── Chrome helpers ────────────────────────────────────────────
 
-    private fun executeChromeAction(action: String): Boolean {
-        // Chrome responds to standard keyboard shortcuts via `input` shell command
-        // These work because Chrome is the foreground app
-        val keyCombos = when (action) {
-            "addressBar" -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_CTRL_LEFT", "KEYCODE_L")
-            "refresh"    -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_CTRL_LEFT", "KEYCODE_R")
-            "back"       -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_ALT_LEFT", "KEYCODE_DPAD_LEFT")
-            "forward"    -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_ALT_LEFT", "KEYCODE_DPAD_RIGHT")
-            "closeTab"   -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_CTRL_LEFT", "KEYCODE_W")
-            "newTab"     -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_CTRL_LEFT", "KEYCODE_T")
-            "find"       -> arrayOf("input", "keyevent", "--longpress", "KEYCODE_CTRL_LEFT", "KEYCODE_F")
+    /**
+     * Chrome honors soft-IME chords delivered via the accessibility
+     * InputConnection. Apps that gate shortcuts on SOURCE_KEYBOARD
+     * (hardware) may ignore them — see §4.6 of the fidelity spec.
+     */
+    private suspend fun executeChromeAction(
+        typewriter: ai.qmachina.phantomtouch.fidelity.Typewriter,
+        action: String,
+    ): Boolean {
+        val (meta, keyCode) = when (action) {
+            "addressBar" -> KeyEvent.META_CTRL_ON to KeyEvent.KEYCODE_L
+            "refresh"    -> KeyEvent.META_CTRL_ON to KeyEvent.KEYCODE_R
+            "back"       -> KeyEvent.META_ALT_ON  to KeyEvent.KEYCODE_DPAD_LEFT
+            "forward"    -> KeyEvent.META_ALT_ON  to KeyEvent.KEYCODE_DPAD_RIGHT
+            "closeTab"   -> KeyEvent.META_CTRL_ON to KeyEvent.KEYCODE_W
+            "newTab"     -> KeyEvent.META_CTRL_ON to KeyEvent.KEYCODE_T
+            "find"       -> KeyEvent.META_CTRL_ON to KeyEvent.KEYCODE_F
             else -> return false
         }
-        return Runtime.getRuntime().exec(keyCombos).waitFor() == 0
+        return typewriter.sendChord(meta, keyCode)
     }
 
     private fun normalizeUrl(url: String): String {
@@ -311,6 +370,93 @@ class CommandExecutor(
             searchTree(child, query, clickableOnly, results)
             child.recycle()
         }
+    }
+
+    /**
+     * Find the first matching node and return it (NOT recycled — caller must recycle).
+     * Used by accessibility action commands (clickNode, setNodeText, etc.)
+     */
+    private fun findFirstMatchingNode(
+        gesture: GestureService,
+        query: String,
+        index: Int = 0,
+        requireEditable: Boolean = false
+    ): AccessibilityNodeInfo? {
+        val root = gesture.rootInActiveWindow ?: return null
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        collectMatchingNodes(root, query.lowercase(), matches, requireEditable)
+        root.recycle()
+        return if (index < matches.size) {
+            // Recycle all except the one we're returning
+            matches.forEachIndexed { i, n -> if (i != index) n.recycle() }
+            matches[index]
+        } else {
+            matches.forEach { it.recycle() }
+            null
+        }
+    }
+
+    private fun collectMatchingNodes(
+        node: AccessibilityNodeInfo,
+        query: String,
+        results: MutableList<AccessibilityNodeInfo>,
+        requireEditable: Boolean
+    ) {
+        val text = node.text?.toString()?.lowercase() ?: ""
+        val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+        val id = node.viewIdResourceName?.lowercase() ?: ""
+
+        val matches = text.contains(query) || desc.contains(query) || id.contains(query)
+        val passEditable = !requireEditable || node.isEditable
+
+        if (matches && passEditable) {
+            // Obtain a fresh reference (not recycled with parent)
+            results.add(AccessibilityNodeInfo.obtain(node))
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectMatchingNodes(child, query, results, requireEditable)
+            child.recycle()
+        }
+    }
+
+    /**
+     * Find a scrollable container, optionally matching a query.
+     * Returns the node (NOT recycled — caller must recycle).
+     */
+    private fun findScrollableNode(
+        gesture: GestureService,
+        query: String
+    ): AccessibilityNodeInfo? {
+        val root = gesture.rootInActiveWindow ?: return null
+        val result = findScrollableInTree(root, query.lowercase())
+        root.recycle()
+        return result
+    }
+
+    private fun findScrollableInTree(
+        node: AccessibilityNodeInfo,
+        query: String
+    ): AccessibilityNodeInfo? {
+        if (node.isScrollable) {
+            if (query.isEmpty()) {
+                return AccessibilityNodeInfo.obtain(node)
+            }
+            val text = node.text?.toString()?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+            if (text.contains(query) || desc.contains(query) || id.contains(query)) {
+                return AccessibilityNodeInfo.obtain(node)
+            }
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = findScrollableInTree(child, query)
+            child.recycle()
+            if (found != null) return found
+        }
+        return null
     }
 
     /**

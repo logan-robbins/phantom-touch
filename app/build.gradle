@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId "ai.qmachina.phantomtouch"
-        minSdk 26  // API 26 = Android 8.0 (dispatchGesture needs 24, MediaProjection foreground needs 26)
+        minSdk 34  // API 34 = Android 14. First reliable AccessibilityService.InputMethod wiring on Samsung/Xiaomi OEM skins.
         targetSdk 34
         versionCode 1
         versionName "0.1.0"

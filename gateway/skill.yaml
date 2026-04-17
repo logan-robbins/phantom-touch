@@ -28,6 +28,11 @@ tools:
   - phantom_press_home
   - phantom_wait_for_element
   - phantom_chrome_action
+  - phantom_click
+  - phantom_long_click
+  - phantom_fill_field
+  - phantom_scroll
+  - phantom_dismiss
   - phantom_batch
 
 mcp:

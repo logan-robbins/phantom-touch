@@ -2,21 +2,27 @@ package ai.qmachina.phantomtouch.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.graphics.Path
-import android.os.Bundle
+import android.accessibilityservice.InputMethod
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import ai.qmachina.phantomtouch.fidelity.Humanizer
+import ai.qmachina.phantomtouch.fidelity.Typewriter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.random.Random
 
 /**
- * Core gesture engine. Runs as an AccessibilityService so it can:
- * 1. Dispatch arbitrary gestures (tap, swipe, long press) at pixel coordinates
- * 2. Inject text into focused fields
- * 3. Dump the accessibility node tree for structured UI understanding
- * 4. Perform global actions (back, home, recents)
+ * Thin [AccessibilityService] wrapper.
+ *
+ * Owns: lifecycle, raw [dispatchGesture] primitive, [rootInActiveWindow]
+ * re-export (via inherited API), global actions (back/home/recents),
+ * [dumpTree], [onCreateInputMethod] override.
+ *
+ * All fidelity logic — gesture synthesis, per-keystroke IME — lives in
+ * [ai.qmachina.phantomtouch.fidelity.Humanizer] and
+ * [ai.qmachina.phantomtouch.fidelity.Typewriter].
  */
 class GestureService : AccessibilityService() {
 
@@ -25,6 +31,12 @@ class GestureService : AccessibilityService() {
         var instance: GestureService? = null
             private set
     }
+
+    /** Seeded per service instance; reseeded on every service connect. */
+    private val rng: Random = Random(System.nanoTime())
+
+    val humanizer: Humanizer by lazy { Humanizer(this, rng) }
+    val typewriter: Typewriter by lazy { Typewriter(this, rng) }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -38,6 +50,10 @@ class GestureService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* no-op */ }
     override fun onInterrupt() { /* no-op */ }
+
+    override fun onCreateInputMethod(): InputMethod {
+        return Typewriter.PhantomInputMethod(this)
+    }
 
     // ── Gesture Dispatch ──────────────────────────────────────────────
 
@@ -60,105 +76,6 @@ class GestureService : AccessibilityService() {
         return withTimeout(10_000) { deferred.await() }
     }
 
-    /** Tap at exact pixel coordinates */
-    suspend fun tap(x: Float, y: Float): Boolean {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 50)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGestureAsync(gesture)
-    }
-
-    /** Long press at coordinates with configurable duration */
-    suspend fun longPress(x: Float, y: Float, durationMs: Long = 1000): Boolean {
-        val path = Path().apply { moveTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGestureAsync(gesture)
-    }
-
-    /**
-     * Swipe from (startX, startY) to (endX, endY).
-     * durationMs controls speed: lower = faster swipe, higher = slower drag.
-     * 
-     * For "scroll down medium speed, 50% of screen":
-     *   swipe(screenW/2, screenH*0.75, screenW/2, screenH*0.25, 400)
-     */
-    suspend fun swipe(
-        startX: Float, startY: Float,
-        endX: Float, endY: Float,
-        durationMs: Long = 300
-    ): Boolean {
-        val path = Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
-        }
-        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGestureAsync(gesture)
-    }
-
-    /**
-     * Pinch gesture for zoom in/out.
-     * startSpan < endSpan = zoom in, startSpan > endSpan = zoom out.
-     * Span is the distance between two fingers in pixels.
-     */
-    suspend fun pinch(
-        centerX: Float, centerY: Float,
-        startSpan: Float, endSpan: Float,
-        durationMs: Long = 400
-    ): Boolean {
-        val halfStart = startSpan / 2
-        val halfEnd = endSpan / 2
-
-        val path1 = Path().apply {
-            moveTo(centerX - halfStart, centerY)
-            lineTo(centerX - halfEnd, centerY)
-        }
-        val path2 = Path().apply {
-            moveTo(centerX + halfStart, centerY)
-            lineTo(centerX + halfEnd, centerY)
-        }
-
-        val stroke1 = GestureDescription.StrokeDescription(path1, 0, durationMs)
-        val stroke2 = GestureDescription.StrokeDescription(path2, 0, durationMs)
-        val gesture = GestureDescription.Builder()
-            .addStroke(stroke1)
-            .addStroke(stroke2)
-            .build()
-        return dispatchGestureAsync(gesture)
-    }
-
-    // ── Text Input ────────────────────────────────────────────────────
-
-    /**
-     * Type text into the currently focused field.
-     * Uses ACTION_SET_TEXT which replaces the field content.
-     * For append behavior, read current text first and prepend.
-     */
-    fun typeText(text: String): Boolean {
-        val focusedNode = findFocusedEditableNode() ?: return false
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-        }
-        val result = focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        focusedNode.recycle()
-        return result
-    }
-
-    fun findFocusedEditableNode(): AccessibilityNodeInfo? {
-        // Try input focus first (text fields)
-        var node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (node != null && node.isEditable) return node
-        node?.recycle()
-
-        // Fall back to accessibility focus
-        node = findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        if (node != null && node.isEditable) return node
-        node?.recycle()
-
-        return null
-    }
-
     // ── Global Actions ────────────────────────────────────────────────
 
     fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
@@ -171,17 +88,10 @@ class GestureService : AccessibilityService() {
      * Dump the accessibility tree as structured JSON.
      * Each node includes: className, text, contentDescription, bounds,
      * isClickable, isEditable, isScrollable, viewId, childCount.
-     * 
-     * The LLM can use this to:
-     * 1. Find elements by text/description without vision
-     * 2. Get precise bounds for tap coordinates
-     * 3. Understand page structure and scrollable containers
      */
     fun dumpTree(): JSONObject {
         val root = rootInActiveWindow ?: return JSONObject().put("error", "no active window")
-        val tree = nodeToJson(root)
-        root.recycle()
-        return tree
+        return nodeToJson(root)
     }
 
     private fun nodeToJson(node: AccessibilityNodeInfo): JSONObject {
@@ -191,7 +101,6 @@ class GestureService : AccessibilityService() {
         node.contentDescription?.let { json.put("desc", it.toString()) }
         node.viewIdResourceName?.let { json.put("id", it) }
 
-        // Bounds in screen coordinates — these are your tap targets
         val rect = android.graphics.Rect()
         node.getBoundsInScreen(rect)
         json.put("bounds", JSONObject().apply {
@@ -203,7 +112,6 @@ class GestureService : AccessibilityService() {
             put("centerY", rect.centerY())
         })
 
-        // Interaction flags — tells the model what's actionable
         val flags = JSONArray()
         if (node.isClickable) flags.put("clickable")
         if (node.isLongClickable) flags.put("longClickable")
@@ -215,14 +123,12 @@ class GestureService : AccessibilityService() {
         if (node.isSelected) flags.put("selected")
         if (flags.length() > 0) json.put("flags", flags)
 
-        // Recurse children
         val childCount = node.childCount
         if (childCount > 0) {
             val children = JSONArray()
             for (i in 0 until childCount) {
                 val child = node.getChild(i) ?: continue
                 children.put(nodeToJson(child))
-                child.recycle()
             }
             json.put("children", children)
         }

@@ -81,7 +81,13 @@ class MainActivity : Activity() {
             "Grants gesture dispatch (tap, swipe, type) and UI tree " +
             "access to any foreground app — LinkedIn, Chrome, Facebook, etc. " +
             "This is the core permission that makes everything work.",
-            size = 12f, color = "#999999", bottomPad = 12
+            size = 12f, color = "#999999", bottomPad = 8
+        ))
+        layout.addView(text(
+            "Android 13+ sideloaded: if the accessibility toggle is greyed out, " +
+            "open Settings → Apps → PhantomTouch → ⋮ (top-right) → " +
+            "\"Allow restricted settings\", then return here. One-time per install.",
+            size = 11f, color = "#FFB366", bottomPad = 12
         ))
         step1Status = statusLabel()
         layout.addView(step1Status)
